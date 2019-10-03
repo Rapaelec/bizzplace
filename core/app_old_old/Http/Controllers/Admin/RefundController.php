@@ -1,0 +1,77 @@
+<?php
+
+namespace App\Http\Controllers\Admin;
+
+use Illuminate\Http\Request;
+use App\Http\Controllers\Controller;
+use App\Refund;
+use App\Orderedproduct;
+use App\Product;
+use App\GeneralSetting as GS;
+use Session;
+
+class RefundController extends Controller
+{
+    public function all() {
+      $data['refunds'] = Refund::orderBy('id', 'DESC')->paginate(10);
+      return view('admin.refunds.index', $data);
+    }
+
+    public function rejected() {
+      $data['refunds'] = Refund::where('status', -1)->orderBy('id', 'DESC')->paginate(10);
+      return view('admin.refunds.index', $data);
+    }
+
+    public function accepted() {
+      $data['refunds'] = Refund::where('status', 1)->orderBy('id', 'DESC')->paginate(10);
+      return view('admin.refunds.index', $data);
+    }
+
+    public function pending() {
+      $data['refunds'] = Refund::where('status', 0)->orderBy('id', 'DESC')->paginate(10);
+      return view('admin.refunds.index', $data);
+    }
+
+    public function accept(Request $request) {
+      $gs = GS::first();
+
+      $refund = Refund::find($request->rid);
+      $refund->status = 1;
+      $refund->save();
+
+      $op = Orderedproduct::find($refund->orderedproduct_id);
+      $op->refunded = 1;
+      $op->save();
+
+      $product = Product::find($op->product_id);
+      $product->sales = $product->sales - $op->quantity;
+      $product->quantity = $product->quantity + $op->quantity;
+      $product->save();
+
+      // snding mail to user
+      send_email($refund->orderedproduct->user->email,$refund->orderedproduct->user->first_name,$refund->orderedproduct->user->phone, $refund->orderedproduct->user->email ,'Demande de remboursement acceptée', "Votre demande de remboursement pour <a href='".url('/')."/product/".$refund->orderedproduct->product->slug . "/" . $refund->orderedproduct->product->id."'>" .$refund->orderedproduct->product->title. "</a> a été accepté. Vous aurez ". $refund->orderedproduct->product_total ." " . $gs->base_curr_text . ".Nous vous contacterons plus tard.");
+      // snding mail to vendor
+      send_email($refund->orderedproduct->vendor->email,$refund->orderedproduct->vendor->shop_name,$refund->orderedproduct->vendor->phone, $refund->orderedproduct->vendor->email ,'Commande remboursée', "Demande de remboursement pour <a href='".url('/')."/product/".$refund->orderedproduct->product->slug."/".$refund->orderedproduct->product->id."'>" .$refund->orderedproduct->product->title. "</a> a été accepté. Vous devrez revenir en arrière ". $refund->orderedproduct->product_total ." " . $gs->base_curr_text . " à nous. Nous vous contacterons plus tard.");
+
+      Session::flash('success', 'Demande de remboursement acceptée!');
+
+      return "success";
+    }
+
+    public function reject(Request $request) {
+      $gs = GS::first();
+
+      $refund = Refund::find($request->rid);
+      $refund->status = -1;
+      $refund->save();
+
+      // snding mail to user
+      send_email($refund->orderedproduct->user->email,$refund->orderedproduct->user->first_name, $refund->orderedproduct->user->phone,$refund->orderedproduct->user->email, 'Refund request rejected', "Your refund request for <a href='".url('/')."/product/".$refund->orderedproduct->product->slug. '/' .$refund->orderedproduct->product->id."'>" .$refund->orderedproduct->product->title. "</a> has been rejected.");
+      // snding mail to vendor
+      send_email($refund->orderedproduct->vendor->email,$refund->orderedproduct->vendor->first_name, $refund->orderedproduct->vendor->phone,$refund->orderedproduct->vendor->email, 'Order refunded', "Refund request for <a href='".url('/')."/product/".$refund->orderedproduct->product->slug . "/" . $refund->orderedproduct->product->id."'>" .$refund->orderedproduct->product->title. "</a> has been rejected.");
+
+      Session::flash('success', 'Demande de remboursement refusée!');
+
+      return "success";
+    }
+}
